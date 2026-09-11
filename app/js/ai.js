@@ -101,6 +101,13 @@ const AI = (() => {
 7. 若某张图片不是账单截图，或没有任何可识别条目，则该图片对应空数组。
 8. 不要编造数据。图片中看不清或没有的字段就留空，金额无法确定则该条目不输出。
 
+【重要：关于「长截图切片」】
+长截图会被自动切成多段后送入，标记形如「第 2/5 段（长图切片）」。识别时请遵守：
+- 相邻切片之间**有一段重叠区域**，重叠处的同一条记录**只输出一次**，不要因为看到两次就输出两条。
+- 判断依据：若某条记录的金额、日期、时间、商户都相同，且在两段中出现的位置分别位于上一段的**末尾**和下一段的**开头**，则是同一条，只保留一次。
+- 切片只在本图内部连续，不同图片之间是独立的账单，不要跨图片去合并记录。
+- 切片边界可能把一行文字切成两半，若某段开头/结尾有看起来残缺、金额或商户不完整的行，优先以文字完整的那一段为准。
+
 【输出格式】严格输出如下 JSON，不要有任何多余文字：
 {
   "results": [
@@ -148,7 +155,11 @@ const AI = (() => {
     ];
 
     images.forEach((img, idx) => {
-      userContent.push({ type: 'text', text: `--- 第 ${idx + 1} 张图片 ---` });
+      const isSlice = /第 \d+\/\d+ 段/.test(img.name || '');
+      const label = isSlice
+        ? `--- 图片 ${idx + 1}：${img.name}（长图切片，与相邻切片的重叠部分不要重复计数）---`
+        : `--- 图片 ${idx + 1}${img.name ? '：' + img.name : ''} ---`;
+      userContent.push({ type: 'text', text: label });
       userContent.push({ type: 'image_url', image_url: { url: img.dataUrl } });
     });
 
@@ -166,21 +177,31 @@ const AI = (() => {
     try {
       parsed = parseJSON(content);
     } catch (e) {
-      throw new Error('AI 返回内容无法解析为 JSON，可能是模型不支持图片或多模态能力受限。原始返回：' + content.slice(0, 200));
+      throw new Error('AI 返回的内容不是有效 JSON，无法解析。可能原因：模型不支持图片输入、上下文超长被截断，或返回被截断。原始返回片段：' + content.slice(0, 200));
     }
 
     const flat = [];
+    const seen = new Set();   // 切片重叠处可能出现重复，做一次兜底去重
     (parsed.results || []).forEach((r) => {
       (r.items || []).forEach((it) => {
         if (!it || !it.amount) return;
         const type = it.type === 'income' ? 'income' : 'expense';
         const cid = it.categoryId || (type === 'income' ? 'other_i' : 'other_e');
+        const amount = Math.abs(Number(it.amount)) || 0;
+        if (!amount) return;
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(it.date || '') ? it.date : today;
+        const time = /^\d{2}:\d{2}$/.test(it.time || '') ? it.time : '';
+        const note = it.merchant || '';
+        // 同类型 + 同金额 + 同日期 + 同时间 + 同商户 → 视为同一条（切片重叠导致）
+        const key = `${type}|${amount}|${date}|${time}|${note}`;
+        if (seen.has(key)) return;
+        seen.add(key);
         flat.push({
           type,
-          amount: Math.abs(Number(it.amount)) || 0,
-          date: /^\d{4}-\d{2}-\d{2}$/.test(it.date || '') ? it.date : today,
-          time: /^\d{2}:\d{2}$/.test(it.time || '') ? it.time : '',
-          note: it.merchant || '',
+          amount,
+          date,
+          time,
+          note,
           categoryId: cid,
           confidence: it.confidence,
           rawText: it.rawText || '',

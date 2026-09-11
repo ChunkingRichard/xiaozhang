@@ -95,10 +95,20 @@ Pages.shot = (root) => {
   fileEl.onchange = async () => {
     const files = Array.from(fileEl.files || []);
     if (!files.length) return;
-    for (const f of files) {
-      if (!f.type.startsWith('image/')) continue;
-      const dataUrl = await compressImage(f);
-      App.state.shotImages.push({ dataUrl, name: f.name });
+    const ld = UI.loading('正在处理图片…');
+    try {
+      for (const f of files) {
+        if (!f.type.startsWith('image/')) continue;
+        const parts = await prepareImages(f);
+        parts.forEach((p) => App.state.shotImages.push({
+          dataUrl: p.dataUrl,
+          name: p.total > 1 ? `${f.name}（第 ${p.part}/${p.total} 段）` : f.name,
+        }));
+      }
+    } catch (e) {
+      UI.toast('图片处理失败：' + e.message);
+    } finally {
+      ld.close();
     }
     fileEl.value = '';
     renderThumbs();
@@ -111,12 +121,24 @@ Pages.shot = (root) => {
     if (!imgs.length) return;
     e.preventDefault();
     (async () => {
-      for (const it of imgs) {
-        const f = it.getAsFile();
-        if (f) App.state.shotImages.push({ dataUrl: await compressImage(f), name: '粘贴图片' });
+      const ld = UI.loading('正在处理图片…');
+      try {
+        for (const it of imgs) {
+          const f = it.getAsFile();
+          if (!f) continue;
+          const parts = await prepareImages(f);
+          parts.forEach((p) => App.state.shotImages.push({
+            dataUrl: p.dataUrl,
+            name: p.total > 1 ? `粘贴图片（第 ${p.part}/${p.total} 段）` : '粘贴图片',
+          }));
+        }
+        ld.close();
+        renderThumbs();
+        UI.toast('已添加粘贴的图片');
+      } catch (err) {
+        ld.close();
+        UI.toast('图片处理失败：' + err.message);
       }
-      renderThumbs();
-      UI.toast('已添加粘贴的图片');
     })();
   };
   document.addEventListener('paste', onPaste);
@@ -309,30 +331,152 @@ Pages.shot = (root) => {
   }
 };
 
-/* 图片压缩，减少 token 消耗与上传体积 */
-function compressImage(file, maxSize = 1400, quality = 0.82) {
-  return new Promise((resolve) => {
+/* =========================================================
+   图片预处理：压缩 + 长图切片
+   目标：让送进多模态模型的每张图都保持文字的像素清晰度
+   ========================================================= */
+
+const IMG_MAX_W = 1400;        // 单图最大宽度
+const IMG_MAX_H = 2000;        // 单段最大高度（超过就切）
+const IMG_LONG_RATIO = 2.4;    // 高宽比超过此值才视为「长图」，需要切片
+const IMG_MAX_SLICES = 6;      // 最多切 6 段
+const IMG_OVERLAP = 70;        // 相邻段重叠像素，避免正好切断一行文字
+
+/* 读取文件为 Image 对象 */
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const img = new Image();
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > maxSize || height > maxSize) {
-          const ratio = Math.min(maxSize / width, maxSize / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width; canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = '#fff';
-        ctx.fillRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = () => resolve(e.target.result);
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('图片解码失败'));
       img.src = e.target.result;
     };
+    reader.onerror = () => reject(new Error('图片读取失败'));
     reader.readAsDataURL(file);
   });
 }
+
+/* 判断图片底色是深还是浅：采样四角及边缘中点的平均亮度 */
+function isDarkImage(img, w, h) {
+  try {
+    const c = document.createElement('canvas');
+    const S = 40;
+    c.width = S; c.height = S;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, w, h, 0, 0, S, S);
+    const d = ctx.getImageData(0, 0, S, S).data;
+    let sum = 0, n = 0;
+    // 只取外圈像素（边框附近最能代表底色）
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const edge = x < 3 || y < 3 || x >= S - 3 || y >= S - 3;
+        if (!edge) continue;
+        const i = (y * S + x) * 4;
+        sum += 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        n++;
+      }
+    }
+    return n > 0 && sum / n < 118;   // 平均亮度低于阈值 → 暗色底
+  } catch (e) {
+    return false;   // 跨域等异常时保守当作浅色底
+  }
+}
+
+/* 把一张图按目标尺寸绘制到 canvas 并导出 */
+function renderTo(img, sx, sy, sw, sh, dw, dh, dark) {
+  const c = document.createElement('canvas');
+  c.width = dw; c.height = dh;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = dark ? '#000' : '#fff';
+  ctx.fillRect(0, 0, dw, dh);
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, dw, dh);
+  // 文字截图用 PNG 无损；纯色截图 PNG 体积也可接受
+  return c.toDataURL('image/png');
+}
+
+/* 计算等比缩放后的尺寸 */
+function fitSize(w, h, maxW, maxH) {
+  let r = 1;
+  if (w > maxW) r = Math.min(r, maxW / w);
+  if (h > maxH) r = Math.min(r, maxH / h);
+  return { w: Math.max(1, Math.round(w * r)), h: Math.max(1, Math.round(h * r)) };
+}
+
+/**
+ * 把一张长图切成多段。返回 [{ dataUrl, part, total }]
+ * 段宽保持高清（不超过 IMG_MAX_W），段高不超过 IMG_MAX_H。
+ */
+function sliceImage(img, dark) {
+  const W = img.naturalWidth || img.width;
+  const H = img.naturalHeight || img.height;
+
+  // 先按宽度做整体缩放（只缩宽，不动高）
+  const scale = W > IMG_MAX_W ? IMG_MAX_W / W : 1;
+  const baseW = Math.round(W * scale);
+  const baseH = Math.round(H * scale);
+
+  // 判定「需要切片」的两个条件必须同时成立：
+  //   1. 高宽比够大（真的是长图，不是普通手机竖屏截图）
+  //   2. 缩放后高度确实超过单段上限
+  // 只满足其中一条就整体等比缩放，避免把 1080×2340 这种正常截图切碎。
+  const isLong = baseH / baseW > IMG_LONG_RATIO && baseH > IMG_MAX_H;
+  if (!isLong) {
+    // 允许长边适度超出上限：只缩宽，高度不再被强行压进 IMG_MAX_H，
+    // 否则长图会被整体压扁导致文字模糊。高度限制交给切片逻辑处理。
+    let w = baseW;
+    let h = baseH;
+    if (h / w > IMG_LONG_RATIO) {
+      // 属于「偏长但还没到切片阈值」的灰区，温和压缩高度
+      h = Math.round(Math.min(h, w * IMG_LONG_RATIO));
+    }
+    return [{ dataUrl: renderTo(img, 0, 0, W, H, w, h, dark), part: 1, total: 1 }];
+  }
+
+  // 长图：按高度切段
+  // 注意：以「每段不超过 IMG_MAX_H」为主约束算出理想段数，
+  // 再用 IMG_MAX_SLICES 封顶。若被封顶，则每段会超过 IMG_MAX_H，
+  // 此时改为等比压缩输出高度，保证单段不会大到撑爆请求。
+  const idealCount = Math.ceil(baseH / IMG_MAX_H);
+  const count = Math.min(idealCount, IMG_MAX_SLICES);
+
+  // 源图（baseW×baseH 坐标系）上每段的高度
+  const segH = Math.ceil(baseH / count);
+  // 输出缩放比：段数被封顶时，需要把每段压到 IMG_MAX_H 以内
+  const outScale = segH > IMG_MAX_H ? IMG_MAX_H / segH : 1;
+
+  const out = [];
+  for (let i = 0; i < count; i++) {
+    const sy = i * segH;
+    // 覆盖高度：非末段向下多取 IMG_OVERLAP*outScale 形成重叠
+    const overlapSrc = Math.round(IMG_OVERLAP / outScale);
+    let sh = segH + (i < count - 1 ? overlapSrc : 0);
+    sh = Math.min(sh, baseH - sy);
+
+    // 映射回原图坐标
+    const oy = Math.round(sy / scale);
+    const oh = Math.min(Math.round(sh / scale), H - oy);
+    const dh = Math.max(1, Math.round((sh) * scale * outScale));
+    out.push({
+      dataUrl: renderTo(img, 0, oy, W, oh, baseW, dh, dark),
+      part: i + 1,
+      total: count,
+    });
+  }
+  return out;
+}
+
+/**
+ * 处理一个文件：返回要送进 AI 的图片数组
+ * 普通图 → 1 张；长图 → 多张切片
+ */
+async function prepareImages(file) {
+  const img = await loadImage(file);
+  const dark = isDarkImage(img, img.naturalWidth || img.width, img.naturalHeight || img.height);
+  const parts = sliceImage(img, dark);
+  parts.forEach((p) => { p.dark = dark; });
+  return parts;
+}
+
+// 供 _dev/test-live-slice.js 在真实浏览器中验证切片逻辑
+window.__prepareImages = prepareImages;

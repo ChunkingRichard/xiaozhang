@@ -345,6 +345,10 @@ function nowTimeStr(d = new Date()) {
 function monthStr(d = new Date()) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
 }
+/** 文件名用的时间戳，精确到秒，避免多次导出互相覆盖 */
+function stampStr(d = new Date()) {
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`;
+}
 function monthRange(month) {
   const [y, m] = month.split('-').map(Number);
   const start = `${y}-${pad2(m)}-01`;
@@ -371,7 +375,7 @@ const DataIO = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `记账备份_${todayStr()}.json`;
+    a.download = `记账备份_${stampStr()}.json`;
     a.click();
     URL.revokeObjectURL(url);
   },
@@ -400,7 +404,7 @@ const DataIO = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `账单明细_${todayStr()}.csv`;
+    a.download = `账单明细_${stampStr()}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   },

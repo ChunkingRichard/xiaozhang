@@ -1,5 +1,5 @@
 /* Service Worker — 离线缓存应用外壳 */
-const CACHE = 'ledger-v3';
+const CACHE = 'ledger-v4';
 const ASSETS = [
   './',
   './index.html',
