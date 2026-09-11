@@ -30,7 +30,7 @@ python -m http.server 8765 --directory app
 
 然后浏览器访问 `http://127.0.0.1:8765`
 
-Windows 用户可直接双击 `start.bat`。
+Windows 用户可直接双击 `start.bat`（它会自动检测 Python 并打开浏览器）。
 
 ### 方式三：部署到 GitHub Pages（电脑手机都能用，强烈推荐）
 
@@ -53,6 +53,9 @@ git push -u origin main
 ```
 
 Windows 用户可直接双击 `push.bat`（首次会弹窗要求登录 GitHub）。
+
+> `push.bat` 被改成**纯 ASCII 内容 + CRLF 换行**，因为 cmd.exe 默认按系统代码页（简体中文是 GBK）解析批处理文件，
+> 含中文的 UTF-8 文件会被拆成乱码并报 `'nload' 不是内部或外部命令` 这类错。以后编辑 `.bat` 时请保持这个格式。
 
 上传后仓库根目录长这样：
 
