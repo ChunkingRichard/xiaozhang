@@ -1,0 +1,19 @@
+# 依赖（本项目零依赖，这行是保险）
+node_modules/
+package-lock.json
+
+# 本地记忆 / 工具配置
+.workbuddy/
+
+# 开发过程产物：验证截图（体积大，无长期价值）
+_dev/screenshots/
+
+# 临时文件
+*.log
+*.tmp
+_dev/_*.json
+
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
