@@ -38,33 +38,42 @@ Windows 用户可直接双击 `start.bat`。
 
 #### 1. 建仓库
 
-在 GitHub 新建一个仓库，比如叫 `ledger`。
+在 GitHub 新建一个仓库（本项目用的是 `xiaozhang`）。建的时候**不要**勾选初始化 README / .gitignore / License，保持空仓库。
 
 #### 2. 上传文件
 
-把 `app` 目录里的**全部内容**上传到仓库根目录（注意：是 `app` 里面的东西，不是 `app` 这个文件夹本身）。
+**整个项目目录**推送到仓库（根目录保留 `app/`、`_dev/`、`README.md` 等结构）。
 
-上传后仓库根目录应该是这样：
-
-```
-index.html
-manifest.webmanifest
-sw.js
-.nojekyll
-css/
-icons/
-js/
+```bash
+git init -b main
+git add -A
+git commit -m "小账 · 本地 AI 记账工具"
+git remote add origin https://github.com/你的用户名/xiaozhang.git
+git push -u origin main
 ```
 
+Windows 用户可直接双击 `push.bat`（首次会弹窗要求登录 GitHub）。
 
+上传后仓库根目录长这样：
 
-> `.nojekyll` 这个空文件很重要，它阻止 GitHub Pages 的 Jekyll 处理，否则带下划线开头的文件会 404。
+```
+app/
+_dev/
+.gitignore
+README.md
+push.bat
+start.bat
+```
+
+`app/.nojekyll` 这个空文件很重要，它阻止 GitHub Pages 的 Jekyll 处理，否则带下划线开头的文件会 404。
 
 #### 3. 开启 Pages
 
 仓库 → **Settings → Pages** → Source 选 `Deploy from a branch` → Branch 选 `main` + `/ (root)` → Save。
 
-等 1~2 分钟，访问 `https://你的用户名.github.io/ledger/` 就能用了。
+等 1~2 分钟，访问 **`https://你的用户名.github.io/xiaozhang/app/`** 就能用了。
+
+> 注意末尾的 `/app/`。因为整个项目都传上去了，`index.html` 在 `app/` 子目录里，所以网址要带上这一层。直接访问仓库根域名会 404。
 
 #### 4. 装到手机
 
@@ -72,7 +81,7 @@ js/
 
 桌面会出现图标，点开就是全屏 App（没有浏览器地址栏），**首次打开后支持离线使用**。
 
-> 因为所有路径都用的相对路径，放在 `用户名.github.io/ledger/` 这样的子目录下也能正常工作，不需要改任何代码。
+> 因为所有路径都用的相对路径（`./css/app.css`、`./js/app.js`），放在 `用户名.github.io/xiaozhang/app/` 这样的子目录下也能正常工作，不需要改任何代码。
 
 #### 5. 电脑上
 
@@ -105,16 +114,16 @@ js/
 
 | 项目       | 说明           | 示例                          |
 | -------- | ------------ | --------------------------- |
-| Base URL | 服务商接口地址      | `https://api.openai.com/v1` |
-| 模型名称     | **必须支持图片输入** | `gpt-4o`                    |
+| Base URL | 服务商接口地址      | `https://api.deepseek.com/v1` |
+| 模型名称     | **必须支持图片输入** | `deepseek-flash`            |
 | API Key  | 你的密钥         | `sk-...`                    |
 
 内置了 OpenAI / DeepSeek / 通义千问 / Kimi / 智谱 的预设，点一下就自动填好地址和模型。
 
 填完点「测试连接」确认可用。
 
-> **截图记账需要多模态模型**（能看图）。纯文本模型（如 deepseek-chat）可以用于 AI 助手对话，但无法识别截图。>   
-> 推荐：`gpt-4o`、`qwen-vl-max`、`glm-4v`、`gemini-2.0-flash` 等。
+> **截图记账需要多模态模型**（能看图）。
+> 推荐：`deepseek-flash`（原生多模态）、`gpt-4o`、`qwen-vl-max`、`glm-4v`、`gemini-2.0-flash` 等。
 
 ---
 

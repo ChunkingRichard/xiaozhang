@@ -26,8 +26,8 @@ Sheets.aiConfig = () => {
       <input class="input" data-base placeholder="https://api.openai.com/v1" value="${UI.esc(s.baseUrl)}">
     </div>
     <div class="field"><label>模型名称</label>
-      <input class="input" data-model placeholder="gpt-4o" value="${UI.esc(s.model)}">
-      <div class="small muted" style="margin-top:5px">截图记账需要模型支持图片输入，例如 gpt-4o / qwen-vl-max / glm-4v / gemini 等</div>
+      <input class="input" data-model placeholder="deepseek-flash" value="${UI.esc(s.model)}">
+      <div class="small muted" style="margin-top:5px">截图记账需要模型支持图片输入，例如 deepseek-flash / gpt-4o / qwen-vl-max / glm-4v / gemini 等</div>
     </div>
     <div class="field"><label>API Key</label>
       <input class="input" data-key type="password" placeholder="sk-..." value="${UI.esc(s.apiKey)}">
